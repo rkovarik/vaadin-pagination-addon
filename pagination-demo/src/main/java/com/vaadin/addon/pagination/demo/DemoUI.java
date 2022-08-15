@@ -3,8 +3,13 @@ package com.vaadin.addon.pagination.demo;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.vaadin.addon.pagination.PaginationDataProviderWrapper;
 import com.vaadin.annotations.Widgetset;
+import com.vaadin.data.provider.DataProvider;
+import com.vaadin.data.provider.ListDataProvider;
+import com.vaadin.data.provider.Query;
 import com.vaadin.ui.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +32,7 @@ import com.vaadin.spring.annotation.SpringUI;
 @SuppressWarnings("serial")
 public class DemoUI extends UI {
 
-	private static final Logger log = LoggerFactory.getLogger(DemoUI.class);
+    private static final Logger log = LoggerFactory.getLogger(DemoUI.class);
 
     public static List<User> userList = new ArrayList<>();
 
@@ -49,16 +54,15 @@ public class DemoUI extends UI {
         final int page = 1;
         final int limit = 20;
 
-        final List<User> users = userList.subList(0, limit);
-        final long total = Long.valueOf(userList.size());
+        final List<User> users = userList;
 
-        final Grid grid = createGrid(users);
-        final Pagination pagination = createPagination(total, page, limit);
+        final Grid<User> grid = createGrid(users);
+        final Pagination pagination = createPagination(page, limit, grid);
         pagination.addPageChangeListener(new PaginationChangeListener() {
             @Override
             public void changed(PaginationResource event) {
                 log.debug("nativeSublist: {}", event.toString());
-                grid.setItems(userList.subList(event.fromIndex(), event.toIndex()));
+                refreshDataProvider(event, grid);
                 grid.scrollToStart();
             }
         });
@@ -75,14 +79,13 @@ public class DemoUI extends UI {
         final long total = users.getTotalElements();
 
         final Grid grid = createGrid(users.getContent());
-        final Pagination pagination = createPagination(total, page, limit);
+        final Pagination pagination = createPagination(page, limit, grid);
         pagination.addPageChangeListener(new PaginationChangeListener() {
             @Override
             public void changed(PaginationResource event) {
                 log.debug("jpaPagable : {}", event.toString());
                 Page<User> users = findAll(event.pageIndex(), event.limit());
                 pagination.setTotalCount(users.getTotalElements());
-                grid.setItems(users.getContent());
                 grid.scrollToStart();
             }
         });
@@ -99,20 +102,24 @@ public class DemoUI extends UI {
         final List<User> users = userRepository.findAll();
         final long total = users.size();
 
-        final Grid grid = createGrid(userList.subList(0, limit));
-        final Pagination pagination = createPagination(total, page, limit);
+        final Grid grid = createGrid(userList);
+        final Pagination pagination = createPagination(page, limit, grid);
         pagination.setItemsPerPageVisible(false);
         pagination.addPageChangeListener(new PaginationChangeListener() {
             @Override
             public void changed(PaginationResource event) {
                 log.debug("gridFindAll : {}", event.toString());
                 pagination.setTotalCount(users.size());
-                grid.setItems(users.subList(event.fromIndex(), event.toIndex()));
+                refreshDataProvider(event, grid);
                 grid.scrollToStart();
             }
         });
         final VerticalLayout layout = createContent(grid, pagination);
         return layout;
+    }
+
+    private void refreshDataProvider(PaginationResource event, Grid<User> grid) {
+        ((PaginationDataProviderWrapper<?, ?>) grid.getDataProvider()).setPaginationResource(event);
     }
 
     public Page<User> findAll(int page, int size) {
@@ -123,7 +130,8 @@ public class DemoUI extends UI {
 
     private Grid createGrid(List<User> users) {
         final Grid<User> grid = new Grid<>();
-        grid.setItems(users);
+        DataProvider<User, ?> dataProvider = new ListDataProvider<>(users);
+        grid.setDataProvider(new PaginationDataProviderWrapper<>(dataProvider));
         grid.setSizeFull();
         grid.addColumn(User::getId).setCaption("ID");
         grid.addColumn(User::getName).setCaption("Name");
@@ -131,10 +139,15 @@ public class DemoUI extends UI {
         return grid;
     }
 
-    private Pagination createPagination(long total, int page, int limit) {
-        final PaginationResource paginationResource = PaginationResource.newBuilder().setTotal(total).setPage(page).setLimit(limit).build();
+    private Pagination createPagination(int page, int limit, Grid<User> grid) {
+        PaginationResource paginationResource = PaginationResource.newBuilder()
+                .setTotal(grid.getDataProvider().size(new Query<>()))
+                .setPage(page)
+                .setLimit(limit)
+                .build();
         final Pagination pagination = new Pagination(paginationResource);
         pagination.setItemsPerPage(10, 20, 50, 100);
+        refreshDataProvider(paginationResource, grid);
         return pagination;
     }
 
